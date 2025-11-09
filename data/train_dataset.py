@@ -1,5 +1,5 @@
 """
-Train dataloader
+Train dataloader - Modified to support tumor masks for fine-tuning
 """
 from data.base_dataset import BaseDataset
 import os
@@ -40,6 +40,7 @@ class TrainDataset(BaseDataset):
         
         self.rootdir = opt.dataroot
         self.isTrain = opt.isTrain
+        self.isTumor = opt.isTumor  # ADD THIS: Enable tumor mask loading
                     
         self.input_paths = sorted(glob.glob(self.rootdir + '/imagesTr/input/*.nii.gz'))  # get image paths
         self.target_paths = sorted(glob.glob(self.rootdir + '/imagesTr/target/*.nii.gz'))  # get image paths
@@ -127,7 +128,7 @@ class TrainDataset(BaseDataset):
         img_A = torch.from_numpy(img_arr_A.astype(np.float32))
         img_B = torch.from_numpy(img_arr_B.astype(np.float32))
         
-        # Calculate alpha
+        # Calculate alpha (respiratory amplitude from body mask)
         dif = np.where(mask_arr_A == mask_arr_B, 0, 1)
         dif[:,dif.shape[1]//2:,:] = 0 # Keep only the anterior part (the back doesn't matter)
         
@@ -135,11 +136,53 @@ class TrainDataset(BaseDataset):
         alpha = np.array([np.mean(np.sum(dif, axis = 1))*spacing[1]])
         # print('alpha', alpha)
         
-        return {'image_A': img_A, 'fpath_A': filepath_A,
-                'image_B': img_B, 'fpath_B': filepath_B,  
-                'alpha': alpha,
-                'dvf' : dvf
-               }
+        # ============================================================
+        # ADD TUMOR MASK LOADING (NEW CODE)
+        # ============================================================
+        tum_A = torch.zeros_like(img_A)
+        tum_B = torch.zeros_like(img_B)
+        tum_dvf = torch.zeros_like(dvf) if self.isTrain else None
+        
+        if self.isTumor and self.isTrain:
+            # Load tumor mask for input phase (A)
+            tumorpath_A = self.rootdir + '/imagesTr/input/tumor/' + name_A
+            if os.path.isfile(tumorpath_A):
+                tum_arr_A = nib.load(tumorpath_A).get_fdata()
+                tum_A = torch.from_numpy(tum_arr_A.astype(np.float32))
+            else:
+                print(f"Warning: Tumor mask not found for input: {name_A}")
+            
+            # Load tumor mask for target phase (B)
+            tumorpath_B = self.rootdir + '/imagesTr/target/tumor/' + name_B
+            if os.path.isfile(tumorpath_B):
+                tum_arr_B = nib.load(tumorpath_B).get_fdata()
+                tum_B = torch.from_numpy(tum_arr_B.astype(np.float32))
+            else:
+                print(f"Warning: Tumor mask not found for target: {name_B}")
+            
+            # Optional: Load tumor DVF if available
+            tumor_dvf_path = self.rootdir + '/imagesTr/target/tumor_dvf/' + name_B
+            if os.path.isfile(tumor_dvf_path):
+                tum_dvf_nii = nib.load(tumor_dvf_path)
+                tum_dvf_arr = tum_dvf_nii.get_fdata().transpose(3,0,1,2)
+                tum_dvf_arr[0, ...] = tum_dvf_arr[0, ...] / spacing[0]
+                tum_dvf_arr[1, ...] = tum_dvf_arr[1, ...] / spacing[1]
+                tum_dvf_arr[2, ...] = tum_dvf_arr[2, ...] / spacing[2]
+                tum_dvf = torch.from_numpy(tum_dvf_arr.astype(np.float32))
+        
+        return_dict = {
+            'image_A': img_A, 
+            'fpath_A': filepath_A,
+            'image_B': img_B, 
+            'fpath_B': filepath_B,  
+            'alpha': alpha,
+            'dvf': dvf,
+            'tum_A': tum_A,      # ADD: Input tumor mask
+            'tum_B': tum_B,      # ADD: Target tumor mask
+            'tum_dvf': tum_dvf   # ADD: Tumor DVF (if available)
+        }
+        
+        return return_dict
     
 
     def __len__(self):
