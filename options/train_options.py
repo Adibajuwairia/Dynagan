@@ -35,7 +35,8 @@ class TrainOptions(BaseOptions):
         parser.add_argument('--pool_size', type=int, default=50, help='the size of image buffer that stores previously generated images')
         parser.add_argument('--lr_policy', type=str, default='linear', help='learning rate policy. [linear | step | plateau | cosine]')
         parser.add_argument('--lr_decay_iters', type=int, default=50, help='multiply by a gamma every lr_decay_iters iterations')
-        parser.add_argument('--isTumor', action='store_true', help='if specified, load tumor masks for fine-tuning on tumor motion')
+        parser.add_argument('--isTumor', action='store_true', help='if specified, load and train with tumor masks for fine-tuning')
+        parser.add_argument('--lambda_tumor', type=float, default=50.0, help='weight for tumor-focused DVF loss')
 
         self.isTrain = True
         return parser
